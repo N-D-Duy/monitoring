@@ -1,0 +1,31 @@
+promtail:
+  server:
+    http_listen_port: 9080
+    grpc_listen_port: 0
+  positions:
+    filename: /tmp/positions.yaml
+  clients:
+    - url: http://loki:3100/loki/api/v1/push
+scrape_configs:
+  # Keep your existing varlogs config
+  - job_name: varlogs
+    static_configs:
+    - targets:
+        - localhost
+      labels:
+        job: varlogs
+        __path__: /var/log/*log
+
+  # Add this new job for Docker container logs
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '.*camera-server.*'
+        action: keep
+      - source_labels: ['__meta_docker_container_name']
+        target_label: 'container'
+    pipeline_stages:
+      - docker: {}
