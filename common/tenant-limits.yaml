@@ -1,6 +1,0 @@
-overrides:
-  "fake":
-    ingestion_rate_mb: 30
-    ingestion_burst_size_mb: 45
-    max_global_streams_per_user: 5000
-    max_chunks_per_query: 2000000

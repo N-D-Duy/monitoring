@@ -1,31 +1,65 @@
-promtail:
-  server:
-    http_listen_port: 9080
-    grpc_listen_port: 0
-  positions:
-    filename: /tmp/positions.yaml
-  clients:
-    - url: http://loki:3100/loki/api/v1/push
-scrape_configs:
-  # Keep your existing varlogs config
-  - job_name: varlogs
-    static_configs:
-    - targets:
-        - localhost
-      labels:
-        job: varlogs
-        __path__: /var/log/*log
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
 
-  # Add this new job for Docker container logs
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Thu thập logs từ tất cả các container Docker
   - job_name: docker
     docker_sd_configs:
       - host: unix:///var/run/docker.sock
         refresh_interval: 5s
     relabel_configs:
       - source_labels: ['__meta_docker_container_name']
-        regex: '.*camera-server.*'
-        action: keep
-      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
         target_label: 'container'
+      - source_labels: ['__meta_docker_container_id']
+        target_label: 'container_id'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'service'
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'project'
     pipeline_stages:
-      - docker: {}
+      - json:
+          expressions:
+            log: log
+            stream: stream
+            time: time
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+          location: UTC
+      - labels:
+          stream:
+      - output:
+          source: log
+
+  # Thu thập logs từ hệ thống
+  - job_name: system
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: varlogs
+          __path__: /var/log/*log
+    pipeline_stages:
+      - match:
+          selector: '{job="varlogs"}'
+          stages:
+          - regex:
+              expression: '(?P<timestamp>\w+\s+\d+\s+\d+:\d+:\d+)\s+(?P<host>\S+)\s+(?P<app>\S+)(?:\[(?P<pid>\d+)\])?: (?P<message>.*)'
+          - labels:
+              host:
+              app:
+              pid:
+          - timestamp:
+              source: timestamp
+              format: Jan 2 15:04:05
+              location: UTC
+          - output:
+              source: message

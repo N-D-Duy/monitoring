@@ -1,38 +1,53 @@
-version: '3.8'
-
 services:
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - TERM=linux
+      - GF_INSTALL_PLUGINS=grafana-clock-panel,grafana-polystat-panel
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin_password
+      - GF_USERS_ALLOW_SIGN_UP=false
+    ports:
+      - '3000:3000'
+    volumes:
+      - 'grafana_data:/var/lib/grafana'
+    depends_on: 
+      - loki
+      - prometheus
+    networks:
+      - monitoring
+
   prometheus:
     image: prom/prometheus:v2.53.0
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - '9090:9090'
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
     networks:
       - monitoring
-    restart: unless-stopped
-
-  node_exporter:
-    image: prom/node-exporter:v1.8.2
-    ports:
-      - "9100:9100"
-    networks:
-      - monitoring
-    restart: unless-stopped
 
   loki:
     image: grafana/loki:3.1.1
-    volumes:
-      - ./loki-config.yml:/etc/loki/loki-config.yml
-      - ./tenant-limits.yaml:/etc/loki/tenant-limits.yaml
-      - loki_data:/loki
-    command:
-      - -config.file=/etc/loki/loki-config.yml
+    container_name: loki
     ports:
       - "3100:3100"
+    volumes:
+      - ./loki-config.yml:/etc/loki/loki-config.yml
+      - loki_data:/loki
+    command: -config.file=/etc/loki/loki-config.yml
+    restart: unless-stopped
     networks:
       - monitoring
-    restart: unless-stopped
     deploy:
       resources:
         limits:
@@ -44,40 +59,71 @@ services:
 
   promtail:
     image: grafana/promtail:3.1.1
+    container_name: promtail
     volumes:
       - ./promtail-config.yml:/etc/promtail/promtail-config.yml
       - /var/log:/var/log
-      - /var/run/docker.sock:/var/run/docker.sock
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail-config.yml
+    restart: unless-stopped
+    depends_on:
+      - loki
     networks:
       - monitoring
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.47.0
+    container_name: cadvisor
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
     restart: unless-stopped
+    ports:
+      - "8080:8080"
+    networks:
+      - monitoring
+
+  node_exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: node_exporter
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'
+    ports:
+      - "9100:9100"
+    networks:
+      - monitoring
 
   jaeger:
     image: jaegertracing/all-in-one:1.58
+    container_name: jaeger
+    restart: unless-stopped
     ports:
-      - "16686:16686"
-      - "14268:14268"
-      - "9411:9411"
+      - "16686:16686"  
+      - "14268:14268" 
+      - "9411:9411"    
+      - "6831:6831/udp"
     networks:
       - monitoring
-    restart: unless-stopped
 
-  grafana:
-    image: grafana/grafana:11.2.0
-    volumes:
-      - grafana_data:/var/lib/grafana
-    ports:
-      - "3000:3000"
-    networks:
-      - monitoring
-    restart: unless-stopped
+volumes:
+  grafana_data: {}
+  loki_data: {}
+  prometheus_data: {}
 
 networks:
   monitoring:
     driver: bridge
-
-volumes:
-  prometheus_data:
-  loki_data:
-  grafana_data:
